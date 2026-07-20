@@ -1,0 +1,68 @@
+# nginx in front of imgsrv: serves cache hits from disk, proxies misses.
+# Also the first line of defence — only grammar-shaped derivative URLs ever
+# reach the Go service; everything else 404s here.
+#
+# Multi-domain: the request's hostname is the top-level directory, so
+# images.example.com/portfolio/photo-400.webp is served from
+# /cache/images.example.com/portfolio/photo-400.webp (and generated from
+# /originals/images.example.com/portfolio/photo.*). Adding a domain is a DNS
+# change plus a directory of originals — nginx and imgsrv are untouched.
+
+# The map validates the host's shape as well as mapping it: dot-separated
+# DNS labels, each starting and ending alphanumeric. That makes leading
+# dots, empty labels, and ".." impossible, so the prefix can never build a
+# path traversal. nginx lowercases $host and strips any port before the map
+# runs. Anything else maps to "" → 404. (An IPv4-literal Host matches the
+# shape and simply maps to a directory that won't exist.)
+map $host $hostdir {
+    default "";
+    ~^(?<h>[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+)$ /$h;
+}
+
+server {
+    listen 80;
+    root /cache;
+
+    # Browsers request this against every host. Serve the host's own
+    # favicon verbatim from its originals directory if it has one (adding
+    # or changing it is just dropping a file there — no code, no cache,
+    # no redeploy); otherwise a success with zero body bytes instead of a
+    # 404. Handled entirely inside nginx: exact-match wins over the regex
+    # below, and this try_files has no proxy fallback, so the Go service
+    # is never touched. Originals are trusted input, and the mount is
+    # read-only.
+    location = /favicon.ico {
+        access_log off;
+        expires 1d;
+        if ($hostdir = "") { return 204; }
+        root /originals;
+        try_files $hostdir/favicon.ico =204;
+    }
+
+    # Only well-shaped derivative URLs are ever tried / proxied.
+    # <path>/<basename>-<token>.<ext> where token matches the grammar:
+    #   N[mod] | Nw | Nh | WxH[mod] | original
+    # (the [whfzstbg] class covers both the w/h dimension selectors and the
+    # single-letter mods valid after a bare number)
+    #
+    # The [:cntrl:] exclusions matter: nginx decodes %XX in the path before
+    # this regex runs and before interpolating $uri into proxy_pass, so a
+    # plain [^/] would admit a decoded CR/LF (from %0d%0a) mid-path and splice
+    # it into the upstream request line — request splitting. Forbidding
+    # control bytes here closes that.
+    location ~ ^/([^/.[:cntrl:]][^/[:cntrl:]]*/)*[^/[:cntrl:]]+-(\d+[whfzstbg]?|\d+x\d+[fzstbwg]?|original)\.(webp|jpe?g|avif)$ {
+        if ($hostdir = "") { return 404; }
+        try_files $hostdir$uri @imgsrv;
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Anything else: fast 404, never touches the backend.
+    location / {
+        return 404;
+    }
+
+    location @imgsrv {
+        proxy_pass http://127.0.0.1:8080$hostdir$uri;
+    }
+}

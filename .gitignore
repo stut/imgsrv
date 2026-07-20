@@ -1,0 +1,15 @@
+# Build output
+/imgsrv
+*.test
+
+# Test/coverage artifacts
+*.out
+coverage.html
+
+# OS/editor noise
+.DS_Store
+.idea/
+.vscode/
+
+# Local scratch
+*.tmp

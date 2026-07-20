@@ -1,0 +1,10 @@
+version: "2"
+
+linters:
+  settings:
+    errcheck:
+      # Errors from these are deliberately ignored: nothing actionable can be
+      # done about a failed Close on a file we're only reading.
+      exclude-functions:
+        - (io.Closer).Close
+        - (*os.File).Close

@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    name: Go
+    # Pinned rather than ubuntu-latest: the native libvips/libheif stack below
+    # is what the processor tests run against, so the OS is part of the test
+    # environment. libheif-plugin-aomenc first appears on 24.04.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      # libvips is a cgo dependency: without the headers the build won't even
+      # compile, and the processor tests exercise the real pipeline.
+      # libheif-plugin-aomenc supplies the AV1 encoder for AVIF output — it's
+      # only a *recommended* dep of libheif, which the runner doesn't pull in,
+      # so heifsave fails with "Unsupported compression" without it.
+      - name: Install libvips
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libvips-dev libheif-plugin-aomenc
+
+      - name: Check formatting
+        run: |
+          UNFORMATTED=$(gofmt -l .)
+          if [ -n "$UNFORMATTED" ]; then
+            echo "The following files are not gofmt-formatted:"
+            echo "$UNFORMATTED"
+            exit 1
+          fi
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.12.2
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test ./...

@@ -1,0 +1,13 @@
+# imgsrv config — mount at /etc/imgsrv/config.yaml (or point CONFIG at it).
+
+# Allowlist of permitted dimension numbers. Every number appearing in a size
+# token must be in this list; anything else is a 400.
+dimensions: [200, 400, 800, 1600, 600]
+
+quality:
+  default: 80   # all sized derivatives
+  original: 90  # the `original` token
+
+# Priority-ordered original extensions: when several originals share a
+# basename, the earliest extension here wins. This is also the default.
+input_extensions: [jpg, jpeg, png, tif, tiff]

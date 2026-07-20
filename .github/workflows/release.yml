@@ -1,0 +1,96 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: 'Version bump for the next dev cycle'
+        type: choice
+        default: minor
+        options:
+          - minor
+          - major
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # main is protected by a ruleset; GITHUB_TOKEN cannot push to it.
+          # This deploy key (public half on the repo with write access,
+          # private half in the RELEASE_DEPLOY_KEY secret) is a ruleset
+          # bypass actor, so the release commits and tag can land directly.
+          ssh-key: ${{ secrets.RELEASE_DEPLOY_KEY }}
+          fetch-depth: 0
+
+      - name: Resolve release version
+        id: version
+        run: |
+          DEV_VERSION=$(cat VERSION)
+          PENDING_VERSION="${DEV_VERSION%-dev}"
+          MAJOR=$(echo $PENDING_VERSION | cut -d. -f1)
+          MINOR=$(echo $PENDING_VERSION | cut -d. -f2)
+          if [ "${{ inputs.bump }}" = "major" ]; then
+            RELEASE_VERSION="$((MAJOR + 1)).0.0"
+            NEXT_VERSION="$((MAJOR + 1)).1.0-dev"
+          else
+            RELEASE_VERSION="$MAJOR.$MINOR.0"
+            NEXT_VERSION="$MAJOR.$((MINOR + 1)).0-dev"
+          fi
+          echo "$RELEASE_VERSION" > VERSION
+          echo "release=$RELEASE_VERSION" >> $GITHUB_OUTPUT
+          echo "next=$NEXT_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Tag release
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add VERSION
+          git commit -m "chore: release v${{ steps.version.outputs.release }} [skip ci]"
+          git tag "v${{ steps.version.outputs.release }}"
+          git push
+          git push --tags
+
+      - name: Bump to next dev version
+        run: |
+          echo "${{ steps.version.outputs.next }}" > VERSION
+          git add VERSION
+          git commit -m "chore: bump version to ${{ steps.version.outputs.next }} [skip ci]"
+          git push
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          # amd64 only for now; add linux/arm64 here if it's ever requested
+          # (arm64 cgo builds run under QEMU and are slow).
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            VERSION=${{ steps.version.outputs.release }}
+          tags: |
+            ghcr.io/stut/imgsrv:v${{ steps.version.outputs.release }}
+            ghcr.io/stut/imgsrv:latest
+
+      - name: Create release
+        run: |
+          gh release create "v${{ steps.version.outputs.release }}" \
+            --title "v${{ steps.version.outputs.release }}" \
+            --generate-notes
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

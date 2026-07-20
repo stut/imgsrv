@@ -1,0 +1,16 @@
+.git
+.github
+.gitignore
+.dockerignore
+*.md
+LICENSE
+Makefile
+config.example.yaml
+imgsrv
+*.test
+*.out
+coverage.html
+.DS_Store
+.idea/
+.vscode/
+*.tmp
