@@ -32,10 +32,6 @@ COPY docker/nginx.conf /etc/nginx/nginx.conf
 COPY nginx.conf.example /etc/nginx/imgsrv.conf
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
-# Rewritten by entrypoint.sh when ROOT_REDIRECT is set; the default keeps
-# the include in imgsrv.conf valid so "/" falls through to its 404.
-RUN printf '# set ROOT_REDIRECT to redirect requests for /\n' > /etc/nginx/imgsrv-root-redirect.conf
-
 ENV ORIGINALS_ROOT=/originals \
     CACHE_ROOT=/cache \
     PORT=8080 \
