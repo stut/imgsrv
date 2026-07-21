@@ -100,7 +100,18 @@ PORT=8080
 HEALTH_PORT=8081                 # GET /healthz
 CONFIG=/etc/imgsrv/config.yaml
 GENERATE_TIMEOUT=30s             # wall-clock bound per generation
+ROOT_REDIRECT=                   # fallback URL for GET / (see Root redirects)
 ```
+
+### Root redirects
+
+A request for exactly `/` returns a 302. The destination is resolved per
+domain: a `.root-redirect` file in the host's originals directory (e.g.
+`/originals/imgsrv.net/.root-redirect`) containing a URL wins; the
+`ROOT_REDIRECT` env var is the fallback for hosts without a file; with
+neither, `/` returns 404. The file is read per request — drop, edit, or
+remove it without a restart. All other non-derivative paths still 404
+directly in nginx.
 
 Config file: see [config.example.yaml](config.example.yaml).
 nginx: see [nginx.conf.example](nginx.conf.example) — baked into the

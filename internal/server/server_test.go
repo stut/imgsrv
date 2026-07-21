@@ -49,7 +49,7 @@ func newTestServer(t *testing.T, proc Processor) (*Server, string, string) {
 	t.Helper()
 	originals, cache := t.TempDir(), t.TempDir()
 	mkfile(t, originals, "holiday/photo.jpg")
-	return New(testConfig(), originals, cache, proc, 4, 0, nil), originals, cache
+	return New(testConfig(), originals, cache, proc, 4, 0, "", nil), originals, cache
 }
 
 func get(t *testing.T, s *Server, path string) *httptest.ResponseRecorder {
@@ -130,6 +130,73 @@ func TestBadRequests400(t *testing.T) {
 	} {
 		if rec := get(t, s, path); rec.Code != http.StatusBadRequest {
 			t.Errorf("%s: status = %d, want 400", path, rec.Code)
+		}
+	}
+}
+
+func TestRootRedirectFallback(t *testing.T) {
+	s, _, _ := newTestServer(t, &stubProcessor{})
+	s.rootRedirect = "https://example.com/"
+
+	// Bare "/" and a prefixed host with no .root-redirect file both fall
+	// back to the env-configured URL.
+	for _, path := range []string{"/", "/imgsrv.net/"} {
+		rec := get(t, s, path)
+		if rec.Code != http.StatusFound {
+			t.Fatalf("%s: status = %d, want 302", path, rec.Code)
+		}
+		if loc := rec.Header().Get("Location"); loc != "https://example.com/" {
+			t.Errorf("%s: Location = %q", path, loc)
+		}
+	}
+
+	// Only root requests redirect; other unmatched paths keep their errors.
+	if rec := get(t, s, "/about"); rec.Code != http.StatusBadRequest {
+		t.Errorf("/about status = %d, want 400", rec.Code)
+	}
+}
+
+func TestRootRedirectPerHost(t *testing.T) {
+	s, originals, _ := newTestServer(t, &stubProcessor{})
+	s.rootRedirect = "https://fallback.example/"
+	mkNamed(t, originals, "imgsrv.net/.root-redirect", "https://stut.net/\n")
+	mkNamed(t, originals, "blank.example/.root-redirect", "  \n")
+
+	// The host's file wins over the fallback (and the trailing newline is
+	// trimmed).
+	rec := get(t, s, "/imgsrv.net/")
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); loc != "https://stut.net/" {
+		t.Errorf("Location = %q", loc)
+	}
+
+	// A whitespace-only file is treated as absent.
+	rec = get(t, s, "/blank.example/")
+	if loc := rec.Header().Get("Location"); rec.Code != http.StatusFound || loc != "https://fallback.example/" {
+		t.Errorf("blank file: status = %d, Location = %q", rec.Code, loc)
+	}
+}
+
+func TestRootWithoutRedirect404(t *testing.T) {
+	s, _, _ := newTestServer(t, &stubProcessor{})
+	for _, path := range []string{"/", "/imgsrv.net/"} {
+		if rec := get(t, s, path); rec.Code != http.StatusNotFound {
+			t.Errorf("%s: status = %d, want 404", path, rec.Code)
+		}
+	}
+}
+
+func TestRootRedirectTraversalSegments404(t *testing.T) {
+	s, originals, _ := newTestServer(t, &stubProcessor{})
+	// Files at the originals root and its parent must not be reachable
+	// via "." or ".." segments.
+	mkNamed(t, originals, ".root-redirect", "https://evil.example/")
+	mkNamed(t, filepath.Dir(originals), ".root-redirect", "https://evil.example/")
+	for _, path := range []string{"/./", "/../"} {
+		if rec := get(t, s, path); rec.Code != http.StatusNotFound {
+			t.Errorf("%s: status = %d, want 404", path, rec.Code)
 		}
 	}
 }

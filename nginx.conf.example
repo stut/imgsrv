@@ -57,6 +57,16 @@ server {
         add_header Cache-Control "public, immutable";
     }
 
+    # Root requests: proxy to imgsrv with the host prefix, the same shape
+    # as derivative proxying. imgsrv answers with a 302 from the host's
+    # /originals/<host>/.root-redirect file (read per request — drop or
+    # edit the file, no restart), falling back to the ROOT_REDIRECT env
+    # var, else 404.
+    location = / {
+        if ($hostdir = "") { return 404; }
+        proxy_pass http://127.0.0.1:8080$hostdir$uri;
+    }
+
     # Anything else: fast 404, never touches the backend.
     location / {
         return 404;

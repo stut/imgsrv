@@ -37,7 +37,8 @@ ENV ORIGINALS_ROOT=/originals \
     PORT=8080 \
     HEALTH_PORT=8081 \
     CONFIG=/etc/imgsrv/config.yaml \
-    GENERATE_TIMEOUT=30s
+    GENERATE_TIMEOUT=30s \
+    ROOT_REDIRECT=""
 
 # 80 is the public port (nginx). 8081 is imgsrv's health endpoint — keep it
 # off any public interface. imgsrv itself listens on 8080; don't publish it.

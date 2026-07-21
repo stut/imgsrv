@@ -46,6 +46,7 @@ func run(log *slog.Logger) error {
 	port := envOr("PORT", "8080")
 	healthPort := envOr("HEALTH_PORT", "8081")
 	configPath := envOr("CONFIG", "/etc/imgsrv/config.yaml")
+	rootRedirect := envOr("ROOT_REDIRECT", "")
 
 	generateTimeout, err := durationOr("GENERATE_TIMEOUT", 30*time.Second)
 	if err != nil {
@@ -63,7 +64,7 @@ func run(log *slog.Logger) error {
 	}
 	defer shutdownVips()
 
-	srv := server.New(cfg, originalsRoot, cacheRoot, processor.New(), runtime.NumCPU(), generateTimeout, log)
+	srv := server.New(cfg, originalsRoot, cacheRoot, processor.New(), runtime.NumCPU(), generateTimeout, rootRedirect, log)
 
 	main := &http.Server{
 		Addr:              ":" + port,

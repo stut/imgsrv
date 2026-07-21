@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"golang.org/x/sync/singleflight"
@@ -34,14 +35,17 @@ type Server struct {
 	group           singleflight.Group
 	sem             chan struct{} // caps concurrent generations
 	generateTimeout time.Duration // wall-clock bound per generation; 0 = none
+	rootRedirect    string        // fallback URL for root requests with no per-host file; "" = 404
 	log             *slog.Logger
 }
 
 // New creates a Server. maxConcurrent caps simultaneous libvips jobs;
 // values < 1 mean 1. generateTimeout bounds the wall-clock time a single
 // generation may take (including the wait for a free libvips slot); 0
-// disables the bound.
-func New(cfg config.Config, originalsRoot, cacheRoot string, proc Processor, maxConcurrent int, generateTimeout time.Duration, log *slog.Logger) *Server {
+// disables the bound. rootRedirect, when non-empty, is the fallback URL that
+// root requests are redirected to when the host has no .root-redirect file;
+// empty means such requests return 404.
+func New(cfg config.Config, originalsRoot, cacheRoot string, proc Processor, maxConcurrent int, generateTimeout time.Duration, rootRedirect string, log *slog.Logger) *Server {
 	if maxConcurrent < 1 {
 		maxConcurrent = 1
 	}
@@ -55,6 +59,7 @@ func New(cfg config.Config, originalsRoot, cacheRoot string, proc Processor, max
 		processor:       proc,
 		sem:             make(chan struct{}, maxConcurrent),
 		generateTimeout: generateTimeout,
+		rootRedirect:    rootRedirect,
 		log:             log,
 	}
 }
@@ -66,6 +71,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Root requests: bare "/" (running without nginx), or "/<host>/" as
+	// proxied by nginx, which prefixes the mapped hostname onto "/" the
+	// same way it does for derivatives. Derivative URLs never end in "/",
+	// so there's no ambiguity.
+	if host, ok := rootRequest(r.URL.Path); ok {
+		s.redirectRoot(w, r, host)
 		return
 	}
 
@@ -117,6 +131,55 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.serveFile(w, r, req, cachePath)
+}
+
+// rootRedirectFile, dropped into a host's originals directory, holds the URL
+// that requests for that host's "/" redirect to. Read per request, so
+// adding or changing it needs no restart.
+const rootRedirectFile = ".root-redirect"
+
+// rootRequest reports whether path is a root request and, when nginx has
+// prefixed the mapped hostname ("/imgsrv.net/"), which host directory it
+// is for. A bare "/" is a root request with no host.
+func rootRequest(path string) (host string, ok bool) {
+	if path == "/" {
+		return "", true
+	}
+	if len(path) > 2 && path[0] == '/' && path[len(path)-1] == '/' {
+		if seg := path[1 : len(path)-1]; !strings.Contains(seg, "/") {
+			return seg, true
+		}
+	}
+	return "", false
+}
+
+// redirectRoot answers a root request: the host's .root-redirect file wins,
+// the ROOT_REDIRECT fallback is next, otherwise 404.
+func (s *Server) redirectRoot(w http.ResponseWriter, r *http.Request, host string) {
+	// nginx's host map can't produce "." or "..", but the bare binary has
+	// no such guard; never let the segment escape the originals root.
+	if host == "." || host == ".." {
+		http.NotFound(w, r)
+		return
+	}
+	if host != "" {
+		b, err := os.ReadFile(filepath.Join(s.originalsRoot, host, rootRedirectFile))
+		switch {
+		case err == nil:
+			if url := strings.TrimSpace(string(b)); url != "" {
+				http.Redirect(w, r, url, http.StatusFound)
+				return
+			}
+			s.log.Warn("empty root-redirect file", "host", host)
+		case !errors.Is(err, os.ErrNotExist):
+			s.log.Warn("reading root-redirect file", "host", host, "error", err)
+		}
+	}
+	if s.rootRedirect != "" {
+		http.Redirect(w, r, s.rootRedirect, http.StatusFound)
+		return
+	}
+	http.NotFound(w, r)
 }
 
 func (s *Server) generate(ctx context.Context, req Request, cachePath string) error {
