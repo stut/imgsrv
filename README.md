@@ -100,6 +100,7 @@ PORT=8080
 HEALTH_PORT=8081                 # GET /healthz
 CONFIG=/etc/imgsrv/config.yaml
 GENERATE_TIMEOUT=30s             # wall-clock bound per generation
+ROOT_REDIRECT=                   # if set, GET / 302s to this URL (default: 404)
 ```
 
 Config file: see [config.example.yaml](config.example.yaml).

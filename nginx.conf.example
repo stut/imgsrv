@@ -57,6 +57,12 @@ server {
         add_header Cache-Control "public, immutable";
     }
 
+    # Root redirect: entrypoint.sh rewrites this file with a
+    # `location = / { return 302 ...; }` block when ROOT_REDIRECT is set;
+    # by default it's a comment and "/" falls through to the 404 below.
+    # Outside Docker, create the file (or delete this include) as needed.
+    include /etc/nginx/imgsrv-root-redirect.conf;
+
     # Anything else: fast 404, never touches the backend.
     location / {
         return 404;

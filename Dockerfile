@@ -32,12 +32,17 @@ COPY docker/nginx.conf /etc/nginx/nginx.conf
 COPY nginx.conf.example /etc/nginx/imgsrv.conf
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
+# Rewritten by entrypoint.sh when ROOT_REDIRECT is set; the default keeps
+# the include in imgsrv.conf valid so "/" falls through to its 404.
+RUN printf '# set ROOT_REDIRECT to redirect requests for /\n' > /etc/nginx/imgsrv-root-redirect.conf
+
 ENV ORIGINALS_ROOT=/originals \
     CACHE_ROOT=/cache \
     PORT=8080 \
     HEALTH_PORT=8081 \
     CONFIG=/etc/imgsrv/config.yaml \
-    GENERATE_TIMEOUT=30s
+    GENERATE_TIMEOUT=30s \
+    ROOT_REDIRECT=""
 
 # 80 is the public port (nginx). 8081 is imgsrv's health endpoint — keep it
 # off any public interface. imgsrv itself listens on 8080; don't publish it.

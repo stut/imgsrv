@@ -4,6 +4,14 @@
 # restarts the pair as a unit.
 set -u
 
+# When ROOT_REDIRECT is set, have nginx answer "/" with a redirect instead
+# of its default 404. imgsrv reads the same variable itself for the
+# nginx-less case.
+if [ -n "${ROOT_REDIRECT:-}" ]; then
+    printf 'location = / {\n    return 302 "%s";\n}\n' "$ROOT_REDIRECT" \
+        > /etc/nginx/imgsrv-root-redirect.conf
+fi
+
 imgsrv &
 imgsrv_pid=$!
 

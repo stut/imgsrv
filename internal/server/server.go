@@ -34,14 +34,16 @@ type Server struct {
 	group           singleflight.Group
 	sem             chan struct{} // caps concurrent generations
 	generateTimeout time.Duration // wall-clock bound per generation; 0 = none
+	rootRedirect    string        // if set, GET / 302s here; otherwise / is 404
 	log             *slog.Logger
 }
 
 // New creates a Server. maxConcurrent caps simultaneous libvips jobs;
 // values < 1 mean 1. generateTimeout bounds the wall-clock time a single
 // generation may take (including the wait for a free libvips slot); 0
-// disables the bound.
-func New(cfg config.Config, originalsRoot, cacheRoot string, proc Processor, maxConcurrent int, generateTimeout time.Duration, log *slog.Logger) *Server {
+// disables the bound. rootRedirect, when non-empty, is the URL that requests
+// for "/" are redirected to; empty means "/" returns 404.
+func New(cfg config.Config, originalsRoot, cacheRoot string, proc Processor, maxConcurrent int, generateTimeout time.Duration, rootRedirect string, log *slog.Logger) *Server {
 	if maxConcurrent < 1 {
 		maxConcurrent = 1
 	}
@@ -55,6 +57,7 @@ func New(cfg config.Config, originalsRoot, cacheRoot string, proc Processor, max
 		processor:       proc,
 		sem:             make(chan struct{}, maxConcurrent),
 		generateTimeout: generateTimeout,
+		rootRedirect:    rootRedirect,
 		log:             log,
 	}
 }
@@ -66,6 +69,16 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// nginx answers "/" itself in production; this covers running without it.
+	if r.URL.Path == "/" {
+		if s.rootRedirect != "" {
+			http.Redirect(w, r, s.rootRedirect, http.StatusFound)
+		} else {
+			http.NotFound(w, r)
+		}
 		return
 	}
 
